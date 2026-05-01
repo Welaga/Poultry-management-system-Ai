@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Health - Poultry MS</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="layout">
+        <div id="sidebar"></div>
+        <main class="main-content">
+            <button class="mobile-menu-btn" onclick="openMobileSidebar()" aria-label="Open menu">☰</button>
+            <header class="page-header">
+                <h1>💊 Health Management</h1>
+                <p>Disease records and vaccination tracking</p>
+            </header>
+
+            <div class="tabs">
+                <button class="tab active" data-tab="disease">Diseases</button>
+                <button class="tab" data-tab="vaccine">Vaccinations</button>
+            </div>
+
+            <section id="tab-disease" class="tab-content active">
+                <div class="card">
+                    <h3>Record Disease</h3>
+                    <form id="diseaseForm" class="form-grid">
+                        <div class="form-group"><label>Batch (optional)</label><select id="d_batch"><option value="">All</option></select></div>
+                        <div class="form-group"><label>Disease Name</label><input type="text" id="d_name" required></div>
+                        <div class="form-group"><label>Diagnosis Date</label><input type="date" id="d_date" required></div>
+                        <div class="form-group"><label>Affected Count</label><input type="number" id="d_affected" min="0" value="0"></div>
+                        <div class="form-group"><label>Medication</label><input type="text" id="d_medication"></div>
+                        <div class="form-group"><label>Cost</label><input type="number" id="d_cost" min="0" step="0.01" value="0"></div>
+                        <div class="form-group">
+                            <label>Status</label>
+                            <select id="d_status">
+                                <option value="ongoing">Ongoing</option>
+                                <option value="resolved">Resolved</option>
+                                <option value="critical">Critical</option>
+                            </select>
+                        </div>
+                        <div class="form-group form-full"><label>Symptoms</label><input type="text" id="d_symptoms"></div>
+                        <div class="form-group form-full"><label>Treatment</label><textarea id="d_treatment" rows="2"></textarea></div>
+                        <div class="form-group form-full"><label>Notes</label><textarea id="d_notes" rows="2"></textarea></div>
+                        <div class="form-actions"><button type="submit" class="btn btn-primary">Record</button></div>
+                    </form>
+                </div>
+                <div class="card">
+                    <h3>Disease History</h3>
+                    <div class="table-wrap"><table class="data-table">
+                        <thead><tr><th>Date</th><th>Batch</th><th>Disease</th><th>Affected</th><th>Treatment</th><th>Status</th></tr></thead>
+                        <tbody id="diseaseTable"><tr><td colspan="6">Loading...</td></tr></tbody>
+                    </table></div>
+                </div>
+            </section>
+
+            <section id="tab-vaccine" class="tab-content">
+                <div class="card">
+                    <h3>Schedule / Record Vaccination</h3>
+                    <form id="vaccineForm" class="form-grid">
+                        <div class="form-group"><label>Batch (optional)</label><select id="v_batch"><option value="">All</option></select></div>
+                        <div class="form-group"><label>Vaccine Name</label><input type="text" id="v_name" required></div>
+                        <div class="form-group"><label>Scheduled Date</label><input type="date" id="v_scheduled" required></div>
+                        <div class="form-group"><label>Dosage</label><input type="text" id="v_dosage"></div>
+                        <div class="form-group">
+                            <label>Administered?</label>
+                            <select id="v_admin">
+                                <option value="false">No (scheduled)</option>
+                                <option value="true">Yes</option>
+                            </select>
+                        </div>
+                        <div class="form-group"><label>Administered Date</label><input type="date" id="v_admin_date"></div>
+                        <div class="form-group"><label>Administered By</label><input type="text" id="v_admin_by"></div>
+                        <div class="form-group"><label>Cost</label><input type="number" id="v_cost" min="0" step="0.01" value="0"></div>
+                        <div class="form-group form-full"><label>Notes</label><input type="text" id="v_notes"></div>
+                        <div class="form-actions"><button type="submit" class="btn btn-primary">Record</button></div>
+                    </form>
+                </div>
+                <div class="card">
+                    <h3>Vaccination Schedule</h3>
+                    <div class="table-wrap"><table class="data-table">
+                        <thead><tr><th>Scheduled</th><th>Batch</th><th>Vaccine</th><th>Dosage</th><th>Status</th><th>Cost</th></tr></thead>
+                        <tbody id="vaccineTable"><tr><td colspan="6">Loading...</td></tr></tbody>
+                    </table></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    <script>
+        initLayout('health');
+        document.getElementById('d_date').valueAsDate = new Date();
+        document.getElementById('v_scheduled').valueAsDate = new Date();
+
+        document.querySelectorAll('.tab').forEach(t => {
+            t.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(x => x.classList.remove('active'));
+                t.classList.add('active');
+                document.getElementById('tab-' + t.dataset.tab).classList.add('active');
+            });
+        });
+
+        async function loadBatches() {
+            try {
+                const batches = await apiGet('/birds/batches');
+                const opts = '<option value="">All / Mixed</option>' + batches.map(b => `<option value="${b.id}">${b.batch_code}</option>`).join('');
+                document.getElementById('d_batch').innerHTML = opts;
+                document.getElementById('v_batch').innerHTML = opts;
+            } catch (err) {}
+        }
+
+        async function loadDiseases() {
+            try {
+                const recs = await apiGet('/health/disease');
+                const tb = document.getElementById('diseaseTable');
+                if (!recs || recs.length === 0) { tb.innerHTML = '<tr><td colspan="6" class="muted">No records</td></tr>'; return; }
+                tb.innerHTML = recs.map(r => `<tr>
+                    <td>${formatDateOnly(r.diagnosis_date)}</td>
+                    <td>${r.batch_id || '-'}</td>
+                    <td><strong>${r.disease_name}</strong></td>
+                    <td>${r.affected_count}</td>
+                    <td>${r.treatment || '-'}</td>
+                    <td><span class="badge badge-${r.status === 'resolved' ? 'success' : (r.status === 'critical' ? 'danger' : 'warning')}">${r.status}</span></td>
+                </tr>`).join('');
+            } catch (err) {}
+        }
+
+        async function loadVaccines() {
+            try {
+                const recs = await apiGet('/health/vaccination');
+                const tb = document.getElementById('vaccineTable');
+                if (!recs || recs.length === 0) { tb.innerHTML = '<tr><td colspan="6" class="muted">No records</td></tr>'; return; }
+                tb.innerHTML = recs.map(r => `<tr>
+                    <td>${formatDateOnly(r.scheduled_date)}</td>
+                    <td>${r.batch_id || '-'}</td>
+                    <td><strong>${r.vaccine_name}</strong></td>
+                    <td>${r.dosage || '-'}</td>
+                    <td>${r.administered ? '<span class="badge badge-success">Done</span>' : '<span class="badge badge-warning">Pending</span>'}</td>
+                    <td>${formatCurrency(r.cost)}</td>
+                </tr>`).join('');
+            } catch (err) {}
+        }
+
+        document.getElementById('diseaseForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                const batch = document.getElementById('d_batch').value;
+                await apiPost('/health/disease', {
+                    batch_id: batch ? parseInt(batch) : null,
+                    disease_name: document.getElementById('d_name').value,
+                    symptoms: document.getElementById('d_symptoms').value || null,
+                    diagnosis_date: document.getElementById('d_date').value,
+                    affected_count: parseInt(document.getElementById('d_affected').value || 0),
+                    treatment: document.getElementById('d_treatment').value || null,
+                    medication: document.getElementById('d_medication').value || null,
+                    cost: parseFloat(document.getElementById('d_cost').value || 0),
+                    status: document.getElementById('d_status').value,
+                    notes: document.getElementById('d_notes').value || null
+                });
+                showAlert('Disease recorded', 'success');
+                e.target.reset();
+                document.getElementById('d_date').valueAsDate = new Date();
+                loadDiseases();
+            } catch (err) { showAlert('Failed: ' + err.message, 'error'); }
+        });
+
+        document.getElementById('vaccineForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                const batch = document.getElementById('v_batch').value;
+                const adminDate = document.getElementById('v_admin_date').value;
+                await apiPost('/health/vaccination', {
+                    batch_id: batch ? parseInt(batch) : null,
+                    vaccine_name: document.getElementById('v_name').value,
+                    scheduled_date: document.getElementById('v_scheduled').value,
+                    administered: document.getElementById('v_admin').value === 'true',
+                    administered_date: adminDate || null,
+                    administered_by: document.getElementById('v_admin_by').value || null,
+                    dosage: document.getElementById('v_dosage').value || null,
+                    cost: parseFloat(document.getElementById('v_cost').value || 0),
+                    notes: document.getElementById('v_notes').value || null
+                });
+                showAlert('Vaccination recorded', 'success');
+                e.target.reset();
+                document.getElementById('v_scheduled').valueAsDate = new Date();
+                loadVaccines();
+            } catch (err) { showAlert('Failed: ' + err.message, 'error'); }
+        });
+
+        loadBatches(); loadDiseases(); loadVaccines();
+    </script>
+</body>
+</html>

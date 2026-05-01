@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Poultry MS</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <script src="/static/vendor/chart.umd.js"></script>
+</head>
+<body>
+    <div class="layout">
+        <div id="sidebar"></div>
+        <main class="main-content">
+            <button class="mobile-menu-btn" onclick="openMobileSidebar()" aria-label="Open menu">☰</button>
+            <header class="page-header">
+                <h1>📊 Dashboard</h1>
+                <p>Real-time overview of your poultry farm</p>
+            </header>
+
+            <section class="stats-grid">
+                <div class="stat-card stat-blue">
+                    <div class="stat-label">Total Birds</div>
+                    <div class="stat-value" id="totalBirds">-</div>
+                    <div class="stat-sub">Across all batches</div>
+                </div>
+                <div class="stat-card stat-green">
+                    <div class="stat-label">Live Birds</div>
+                    <div class="stat-value" id="liveBirds">-</div>
+                    <div class="stat-sub" id="totalBatches">- batches</div>
+                </div>
+                <div class="stat-card stat-red">
+                    <div class="stat-label">Mortality</div>
+                    <div class="stat-value" id="deadBirds">-</div>
+                    <div class="stat-sub" id="mortalityRate">-% rate</div>
+                </div>
+                <div class="stat-card stat-yellow">
+                    <div class="stat-label">Eggs Today</div>
+                    <div class="stat-value" id="eggsToday">-</div>
+                    <div class="stat-sub" id="eggsWeek">- this week</div>
+                </div>
+                <div class="stat-card stat-purple">
+                    <div class="stat-label">Feed Stock</div>
+                    <div class="stat-value" id="feedStock">-</div>
+                    <div class="stat-sub">kg available</div>
+                </div>
+                <div class="stat-card stat-teal">
+                    <div class="stat-label">Eggs in Storage</div>
+                    <div class="stat-value" id="eggsStorage">-</div>
+                    <div class="stat-sub">ready to sell</div>
+                </div>
+                <div class="stat-card stat-orange">
+                    <div class="stat-label">Performance</div>
+                    <div class="stat-value" id="performanceScore">-</div>
+                    <div class="stat-sub" id="performanceGrade">Score</div>
+                </div>
+                <div class="stat-card stat-pink">
+                    <div class="stat-label">Sales (week)</div>
+                    <div class="stat-value" id="salesWeek">-</div>
+                    <div class="stat-sub" id="activeDiseases">- active diseases</div>
+                </div>
+            </section>
+
+            <section class="charts-grid">
+                <div class="card">
+                    <h3>Egg Production - Last 14 Days</h3>
+                    <canvas id="eggsChart"></canvas>
+                </div>
+                <div class="card">
+                    <h3>Mortality Trend - Last 30 Days</h3>
+                    <canvas id="mortalityChart"></canvas>
+                </div>
+            </section>
+
+            <section class="row-grid">
+                <div class="card">
+                    <h3>🚨 Active Alerts</h3>
+                    <div id="alertsList" class="alerts-list">Loading...</div>
+                </div>
+                <div class="card">
+                    <h3>💡 Smart Insights</h3>
+                    <ul id="insightsList" class="insights-list">Loading...</ul>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    <script>
+        initLayout('dashboard');
+
+        async function loadDashboard() {
+            try {
+                const summary = await apiGet('/dashboard/summary');
+                document.getElementById('totalBirds').textContent = summary.total_birds;
+                document.getElementById('liveBirds').textContent = summary.live_birds;
+                document.getElementById('totalBatches').textContent = summary.total_batches + ' batches';
+                document.getElementById('deadBirds').textContent = summary.dead_birds;
+                document.getElementById('mortalityRate').textContent = summary.mortality_rate + '% rate';
+                document.getElementById('eggsToday').textContent = summary.eggs_today;
+                document.getElementById('eggsWeek').textContent = summary.eggs_week + ' this week';
+                document.getElementById('feedStock').textContent = summary.feed_stock_kg.toFixed(1);
+                document.getElementById('eggsStorage').textContent = summary.egg_storage;
+                document.getElementById('salesWeek').textContent = formatCurrency(summary.sales_week);
+                document.getElementById('activeDiseases').textContent = summary.active_diseases + ' active diseases';
+
+                // Performance
+                try {
+                    const perf = await apiGet('/analytics/performance-score');
+                    document.getElementById('performanceScore').textContent = perf.score;
+                    document.getElementById('performanceGrade').textContent = perf.grade;
+                } catch(e) {}
+
+                // Alerts
+                try {
+                    const alertsResp = await apiGet('/dashboard/alerts');
+                    const alerts = alertsResp.alerts || [];
+                    const alertsEl = document.getElementById('alertsList');
+                    if (alerts.length === 0) {
+                        alertsEl.innerHTML = '<p class="muted">No active alerts ✓</p>';
+                    } else {
+                        alertsEl.innerHTML = alerts.map(a => `
+                            <div class="alert-item alert-${a.severity}">
+                                <strong>${a.title}</strong>
+                                <p>${a.message}</p>
+                                <small>${formatDate(a.created_at)}</small>
+                                <button class="btn btn-sm" onclick="resolveAlert(${a.id})">Resolve</button>
+                            </div>
+                        `).join('');
+                    }
+                } catch(e) {}
+
+                // Insights
+                try {
+                    const insResp = await apiGet('/dashboard/insights');
+                    const insights = insResp.insights || [];
+                    const insightsEl = document.getElementById('insightsList');
+                    if (insights.length === 0) {
+                        insightsEl.innerHTML = '<li class="muted">No insights available yet.</li>';
+                    } else {
+                        insightsEl.innerHTML = insights.map(i => {
+                            const text = typeof i === 'string' ? i : (i.text || JSON.stringify(i));
+                            const iconMap = { success: '✅', warning: '⚠️', danger: '🚨', info: 'ℹ️' };
+                            const ic = (typeof i === 'object' && i.icon) ? (iconMap[i.icon] || '💡') : '💡';
+                            return `<li><span style="margin-right:8px">${ic}</span>${text}</li>`;
+                        }).join('');
+                    }
+                } catch(e) {}
+
+                // Charts
+                try {
+                    const eggsTrend = await apiGet('/dashboard/charts/eggs-trend?days=14');
+                    const eggsData = eggsTrend.data || [];
+                    renderLineChart('eggsChart', eggsData.map(d => d.date), eggsData.map(d => d.eggs), 'Eggs collected', '#fbbf24');
+                } catch(e) {}
+
+                try {
+                    const mortTrend = await apiGet('/dashboard/charts/mortality-trend?days=30');
+                    const mortData = mortTrend.data || [];
+                    renderLineChart('mortalityChart', mortData.map(d => d.date), mortData.map(d => d.deaths), 'Deaths', '#ef4444');
+                } catch(e) {}
+            } catch (err) {
+                showAlert('Failed to load dashboard: ' + err.message, 'error');
+            }
+        }
+
+        async function resolveAlert(id) {
+            try {
+                await apiPost(`/dashboard/alerts/${id}/resolve`, {});
+                showAlert('Alert resolved', 'success');
+                loadDashboard();
+            } catch (err) { showAlert('Failed: ' + err.message, 'error'); }
+        }
+
+        const charts = {};
+        function renderLineChart(canvasId, labels, data, label, color) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            if (charts[canvasId]) charts[canvasId].destroy();
+            charts[canvasId] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: label,
+                        data: data,
+                        borderColor: color,
+                        backgroundColor: color + '33',
+                        tension: 0.3,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: true } }
+                }
+            });
+        }
+
+        loadDashboard();
+        setInterval(loadDashboard, 60000);
+    </script>
+</body>
+</html>

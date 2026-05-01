@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eggs - Poultry MS</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="layout">
+        <div id="sidebar"></div>
+        <main class="main-content">
+            <button class="mobile-menu-btn" onclick="openMobileSidebar()" aria-label="Open menu">☰</button>
+            <header class="page-header">
+                <h1>🥚 Egg Management</h1>
+                <p>Track egg collection, storage and sales</p>
+            </header>
+
+            <section class="stats-grid">
+                <div class="stat-card stat-yellow">
+                    <div class="stat-label">In Storage</div>
+                    <div class="stat-value" id="storageQty">-</div>
+                </div>
+                <div class="stat-card stat-blue">
+                    <div class="stat-label">Storage Location</div>
+                    <div class="stat-value" id="storageLoc" style="font-size:1rem">-</div>
+                </div>
+                <div class="stat-card stat-green">
+                    <div class="stat-label">Last Updated</div>
+                    <div class="stat-value" id="storageUpdated" style="font-size:1rem">-</div>
+                </div>
+            </section>
+
+            <div class="tabs">
+                <button class="tab active" data-tab="collection">Collection</button>
+                <button class="tab" data-tab="sales">Sales</button>
+            </div>
+
+            <section id="tab-collection" class="tab-content active">
+                <div class="card">
+                    <h3>Record Egg Collection</h3>
+                    <form id="eggForm" class="form-grid">
+                        <div class="form-group"><label>Batch (optional)</label><select id="e_batch"><option value="">All</option></select></div>
+                        <div class="form-group"><label>Date</label><input type="date" id="e_date" required></div>
+                        <div class="form-group"><label>Total Eggs</label><input type="number" id="e_total" required min="0"></div>
+                        <div class="form-group"><label>Broken</label><input type="number" id="e_broken" value="0" min="0"></div>
+                        <div class="form-group form-full"><label>Notes</label><input type="text" id="e_notes"></div>
+                        <div class="form-actions"><button type="submit" class="btn btn-primary">Save Collection</button></div>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h3>Recent Collections</h3>
+                    <div class="table-wrap"><table class="data-table">
+                        <thead><tr><th>Date</th><th>Batch</th><th>Total</th><th>Broken</th><th>Good</th><th>Notes</th></tr></thead>
+                        <tbody id="collectionTable"><tr><td colspan="6">Loading...</td></tr></tbody>
+                    </table></div>
+                </div>
+            </section>
+
+            <section id="tab-sales" class="tab-content">
+                <div class="card">
+                    <h3>Record Sale</h3>
+                    <form id="saleForm" class="form-grid">
+                        <div class="form-group"><label>Date</label><input type="date" id="s_date" required></div>
+                        <div class="form-group"><label>Quantity</label><input type="number" id="s_qty" required min="1"></div>
+                        <div class="form-group"><label>Price per egg</label><input type="number" id="s_price" required min="0" step="0.01"></div>
+                        <div class="form-group"><label>Customer</label><input type="text" id="s_customer"></div>
+                        <div class="form-group">
+                            <label>Payment Status</label>
+                            <select id="s_status">
+                                <option value="paid">Paid</option>
+                                <option value="pending">Pending</option>
+                                <option value="partial">Partial</option>
+                            </select>
+                        </div>
+                        <div class="form-group form-full"><label>Notes</label><input type="text" id="s_notes"></div>
+                        <div class="form-actions"><button type="submit" class="btn btn-success">Record Sale</button></div>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h3>Recent Sales</h3>
+                    <div class="table-wrap"><table class="data-table">
+                        <thead><tr><th>Date</th><th>Customer</th><th>Qty</th><th>Unit</th><th>Total</th><th>Status</th></tr></thead>
+                        <tbody id="salesTable"><tr><td colspan="6">Loading...</td></tr></tbody>
+                    </table></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    <script>
+        initLayout('eggs');
+        document.getElementById('e_date').valueAsDate = new Date();
+        document.getElementById('s_date').valueAsDate = new Date();
+
+        document.querySelectorAll('.tab').forEach(t => {
+            t.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(x => x.classList.remove('active'));
+                t.classList.add('active');
+                document.getElementById('tab-' + t.dataset.tab).classList.add('active');
+            });
+        });
+
+        async function loadStorage() {
+            try {
+                const s = await apiGet('/eggs/storage');
+                document.getElementById('storageQty').textContent = s.quantity;
+                document.getElementById('storageLoc').textContent = s.storage_location || 'Default';
+                document.getElementById('storageUpdated').textContent = s.last_updated ? formatDateOnly(s.last_updated) : '-';
+            } catch (err) {}
+        }
+
+        async function loadBatches() {
+            try {
+                const batches = await apiGet('/birds/batches');
+                document.getElementById('e_batch').innerHTML = '<option value="">All / Mixed</option>' +
+                    batches.map(b => `<option value="${b.id}">${b.batch_code}</option>`).join('');
+            } catch (err) {}
+        }
+
+        async function loadCollections() {
+            try {
+                const records = await apiGet('/eggs/collection');
+                const tbody = document.getElementById('collectionTable');
+                if (!records || records.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="muted">No records</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = records.map(r => `
+                    <tr>
+                        <td>${formatDateOnly(r.collection_date)}</td>
+                        <td>${r.batch_id || '-'}</td>
+                        <td>${r.total_eggs}</td>
+                        <td>${r.broken_eggs}</td>
+                        <td><strong>${r.good_eggs}</strong></td>
+                        <td>${r.notes || '-'}</td>
+                    </tr>
+                `).join('');
+            } catch (err) {}
+        }
+
+        async function loadSales() {
+            try {
+                const records = await apiGet('/eggs/sales');
+                const tbody = document.getElementById('salesTable');
+                if (!records || records.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="muted">No sales</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = records.map(r => `
+                    <tr>
+                        <td>${formatDateOnly(r.sale_date)}</td>
+                        <td>${r.customer_name || '-'}</td>
+                        <td>${r.quantity}</td>
+                        <td>${formatCurrency(r.price_per_unit)}</td>
+                        <td><strong>${formatCurrency(r.total_amount)}</strong></td>
+                        <td><span class="badge badge-${r.payment_status === 'paid' ? 'success' : 'warning'}">${r.payment_status}</span></td>
+                    </tr>
+                `).join('');
+            } catch (err) {}
+        }
+
+        document.getElementById('eggForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                const batch = document.getElementById('e_batch').value;
+                await apiPost('/eggs/collection', {
+                    batch_id: batch ? parseInt(batch) : null,
+                    collection_date: document.getElementById('e_date').value,
+                    total_eggs: parseInt(document.getElementById('e_total').value),
+                    broken_eggs: parseInt(document.getElementById('e_broken').value || 0),
+                    notes: document.getElementById('e_notes').value || null
+                });
+                showAlert('Collection recorded', 'success');
+                e.target.reset();
+                document.getElementById('e_date').valueAsDate = new Date();
+                document.getElementById('e_broken').value = 0;
+                loadCollections(); loadStorage();
+            } catch (err) { showAlert('Failed: ' + err.message, 'error'); }
+        });
+
+        document.getElementById('saleForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                await apiPost('/eggs/sales', {
+                    sale_date: document.getElementById('s_date').value,
+                    quantity: parseInt(document.getElementById('s_qty').value),
+                    price_per_unit: parseFloat(document.getElementById('s_price').value),
+                    customer_name: document.getElementById('s_customer').value || null,
+                    payment_status: document.getElementById('s_status').value,
+                    notes: document.getElementById('s_notes').value || null
+                });
+                showAlert('Sale recorded', 'success');
+                e.target.reset();
+                document.getElementById('s_date').valueAsDate = new Date();
+                loadSales(); loadStorage();
+            } catch (err) { showAlert('Failed: ' + err.message, 'error'); }
+        });
+
+        loadBatches(); loadStorage(); loadCollections(); loadSales();
+    </script>
+</body>
+</html>

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Assistant - Poultry MS</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="layout">
+        <div id="sidebar"></div>
+        <main class="main-content">
+            <button class="mobile-menu-btn" onclick="openMobileSidebar()" aria-label="Open menu">☰</button>
+            <header class="page-header">
+                <h1>🤖 AI Farm Assistant</h1>
+                <p>Get suggestions on feeding, diseases, biosecurity and more</p>
+            </header>
+
+            <div class="chatbot-wrapper">
+                <div class="card chat-card">
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="chat-msg bot">
+                            <div class="chat-bubble">
+                                👋 Hello! I'm your poultry farm assistant. Ask me anything about feeding, health, vaccination, biosecurity, or farm optimization!
+                            </div>
+                        </div>
+                    </div>
+                    <form id="chatForm" class="chat-input">
+                        <input type="text" id="chatInput" placeholder="Ask a question..." autocomplete="off" required>
+                        <button type="submit" class="btn btn-primary">Send</button>
+                    </form>
+                </div>
+
+                <div class="card suggestions-card">
+                    <h3>💡 Suggested Questions</h3>
+                    <div id="suggestionsList"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    <script>
+        initLayout('chatbot');
+
+        async function loadSuggestions() {
+            try {
+                const resp = await apiGet('/chat/suggestions');
+                const sug = resp.suggestions || [];
+                const el = document.getElementById('suggestionsList');
+                el.innerHTML = sug.map(s => `<button class="suggestion-btn" data-q="${s.replace(/"/g, '&quot;')}">${s}</button>`).join('');
+                el.querySelectorAll('.suggestion-btn').forEach(btn => {
+                    btn.addEventListener('click', () => askQuestion(btn.dataset.q));
+                });
+            } catch (err) {}
+        }
+
+        function appendMessage(text, sender) {
+            const m = document.getElementById('chatMessages');
+            const div = document.createElement('div');
+            div.className = 'chat-msg ' + sender;
+            const safe = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+            div.innerHTML = `<div class="chat-bubble">${safe}</div>`;
+            m.appendChild(div);
+            m.scrollTop = m.scrollHeight;
+        }
+
+        async function sendMessage(text) {
+            appendMessage(text, 'user');
+            try {
+                const res = await apiPost('/chat/message', { message: text });
+                appendMessage(res.response, 'bot');
+                if (res.suggestions && res.suggestions.length > 0) {
+                    const m = document.getElementById('chatMessages');
+                    const div = document.createElement('div');
+                    div.className = 'chat-msg bot';
+                    div.innerHTML = `<div class="chat-bubble" style="font-size:0.9rem">
+                        <strong>💡 You might also ask:</strong><br>
+                        ${res.suggestions.map(s => `<button class="suggestion-btn" data-q="${s.replace(/"/g, '&quot;')}">${s}</button>`).join('')}
+                    </div>`;
+                    m.appendChild(div);
+                    div.querySelectorAll('.suggestion-btn').forEach(btn => {
+                        btn.addEventListener('click', () => askQuestion(btn.dataset.q));
+                    });
+                    m.scrollTop = m.scrollHeight;
+                }
+            } catch (err) {
+                appendMessage('Error: ' + err.message, 'bot');
+            }
+        }
+
+        function askQuestion(q) {
+            document.getElementById('chatInput').value = q;
+            sendMessage(q);
+        }
+
+        document.getElementById('chatForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const input = document.getElementById('chatInput');
+            const text = input.value.trim();
+            if (!text) return;
+            input.value = '';
+            sendMessage(text);
+        });
+
+        loadSuggestions();
+    </script>
+</body>
+</html>

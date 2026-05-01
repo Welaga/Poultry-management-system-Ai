@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feed - Poultry MS</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="layout">
+        <div id="sidebar"></div>
+        <main class="main-content">
+            <button class="mobile-menu-btn" onclick="openMobileSidebar()" aria-label="Open menu">☰</button>
+            <header class="page-header">
+                <h1>🌾 Feed Management</h1>
+                <p>Track feed purchases, consumption and stock</p>
+            </header>
+
+            <section class="card">
+                <h3>Current Inventory</h3>
+                <div class="table-wrap"><table class="data-table">
+                    <thead><tr><th>Feed Type</th><th>Stock (kg)</th><th>Status</th></tr></thead>
+                    <tbody id="invTable"><tr><td colspan="3">Loading...</td></tr></tbody>
+                </table></div>
+            </section>
+
+            <div class="tabs">
+                <button class="tab active" data-tab="purchase">Purchases</button>
+                <button class="tab" data-tab="consumption">Consumption</button>
+            </div>
+
+            <section id="tab-purchase" class="tab-content active">
+                <div class="card">
+                    <h3>Record Feed Purchase</h3>
+                    <form id="purchaseForm" class="form-grid">
+                        <div class="form-group"><label>Feed Type</label><input type="text" id="p_type" required placeholder="Layer Mash, Broiler Starter..."></div>
+                        <div class="form-group"><label>Quantity (kg)</label><input type="number" id="p_qty" required min="0.1" step="0.1"></div>
+                        <div class="form-group"><label>Price / kg</label><input type="number" id="p_price" required min="0" step="0.01"></div>
+                        <div class="form-group"><label>Purchase Date</label><input type="date" id="p_date" required></div>
+                        <div class="form-group"><label>Supplier</label><input type="text" id="p_supplier"></div>
+                        <div class="form-group form-full"><label>Notes</label><input type="text" id="p_notes"></div>
+                        <div class="form-actions"><button type="submit" class="btn btn-primary">Add Purchase</button></div>
+                    </form>
+                </div>
+                <div class="card">
+                    <h3>Purchase History</h3>
+                    <div class="table-wrap"><table class="data-table">
+                        <thead><tr><th>Date</th><th>Type</th><th>Qty (kg)</th><th>Price/kg</th><th>Total</th><th>Supplier</th></tr></thead>
+                        <tbody id="purchaseTable"><tr><td colspan="6">Loading...</td></tr></tbody>
+                    </table></div>
+                </div>
+            </section>
+
+            <section id="tab-consumption" class="tab-content">
+                <div class="card">
+                    <h3>Record Consumption</h3>
+                    <form id="consumptionForm" class="form-grid">
+                        <div class="form-group"><label>Feed Type</label><input type="text" id="c_type" required></div>
+                        <div class="form-group"><label>Quantity (kg)</label><input type="number" id="c_qty" required min="0.1" step="0.1"></div>
+                        <div class="form-group"><label>Date</label><input type="date" id="c_date" required></div>
+                        <div class="form-group"><label>Batch (optional)</label><select id="c_batch"><option value="">All</option></select></div>
+                        <div class="form-group form-full"><label>Notes</label><input type="text" id="c_notes"></div>
+                        <div class="form-actions"><button type="submit" class="btn btn-primary">Record</button></div>
+                    </form>
+                </div>
+                <div class="card">
+                    <h3>Consumption History</h3>
+                    <div class="table-wrap"><table class="data-table">
+                        <thead><tr><th>Date</th><th>Feed Type</th><th>Qty (kg)</th><th>Batch</th><th>Notes</th></tr></thead>
+                        <tbody id="consumptionTable"><tr><td colspan="5">Loading...</td></tr></tbody>
+                    </table></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    <script>
+        initLayout('feed');
+        document.getElementById('p_date').valueAsDate = new Date();
+        document.getElementById('c_date').valueAsDate = new Date();
+
+        document.querySelectorAll('.tab').forEach(t => {
+            t.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(x => x.classList.remove('active'));
+                t.classList.add('active');
+                document.getElementById('tab-' + t.dataset.tab).classList.add('active');
+            });
+        });
+
+        async function loadInventory() {
+            try {
+                const inv = await apiGet('/feed/inventory');
+                const tbody = document.getElementById('invTable');
+                if (!inv || inv.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="3" class="muted">No inventory yet</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = inv.map(i => {
+                    const low = i.quantity_kg < 50;
+                    return `<tr>
+                        <td>${i.feed_type}</td>
+                        <td><strong>${i.quantity_kg.toFixed(1)}</strong></td>
+                        <td>${low ? '<span class="badge badge-danger">Low</span>' : '<span class="badge badge-success">OK</span>'}</td>
+                    </tr>`;
+                }).join('');
+            } catch (err) {}
+        }
+
+        async function loadBatches() {
+            try {
+                const batches = await apiGet('/birds/batches');
+                document.getElementById('c_batch').innerHTML = '<option value="">All / Mixed</option>' +
+                    batches.map(b => `<option value="${b.id}">${b.batch_code}</option>`).join('');
+            } catch (err) {}
+        }
+
+        async function loadPurchases() {
+            try {
+                const records = await apiGet('/feed/purchase');
+                const tbody = document.getElementById('purchaseTable');
+                if (!records || records.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="muted">No purchases</td></tr>'; return; }
+                tbody.innerHTML = records.map(r => `
+                    <tr>
+                        <td>${formatDateOnly(r.purchase_date)}</td>
+                        <td>${r.feed_type}</td>
+                        <td>${r.quantity_kg.toFixed(1)}</td>
+                        <td>${formatCurrency(r.price_per_kg)}</td>
+                        <td><strong>${formatCurrency(r.total_cost)}</strong></td>
+                        <td>${r.supplier || '-'}</td>
+                    </tr>
+                `).join('');
+            } catch (err) {}
+        }
+
+        async function loadConsumption() {
+            try {
+                const records = await apiGet('/feed/consumption');
+                const tbody = document.getElementById('consumptionTable');
+                if (!records || records.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="muted">No records</td></tr>'; return; }
+                tbody.innerHTML = records.map(r => `
+                    <tr>
+                        <td>${formatDateOnly(r.consumption_date)}</td>
+                        <td>${r.feed_type}</td>
+                        <td>${r.quantity_kg.toFixed(1)}</td>
+                        <td>${r.batch_id || '-'}</td>
+                        <td>${r.notes || '-'}</td>
+                    </tr>
+                `).join('');
+            } catch (err) {}
+        }
+
+        document.getElementById('purchaseForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                await apiPost('/feed/purchase', {
+                    feed_type: document.getElementById('p_type').value,
+                    quantity_kg: parseFloat(document.getElementById('p_qty').value),
+                    price_per_kg: parseFloat(document.getElementById('p_price').value),
+                    purchase_date: document.getElementById('p_date').value,
+                    supplier: document.getElementById('p_supplier').value || null,
+                    notes: document.getElementById('p_notes').value || null
+                });
+                showAlert('Purchase added', 'success');
+                e.target.reset();
+                document.getElementById('p_date').valueAsDate = new Date();
+                loadInventory(); loadPurchases();
+            } catch (err) { showAlert('Failed: ' + err.message, 'error'); }
+        });
+
+        document.getElementById('consumptionForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                const batch = document.getElementById('c_batch').value;
+                await apiPost('/feed/consumption', {
+                    feed_type: document.getElementById('c_type').value,
+                    quantity_kg: parseFloat(document.getElementById('c_qty').value),
+                    consumption_date: document.getElementById('c_date').value,
+                    batch_id: batch ? parseInt(batch) : null,
+                    notes: document.getElementById('c_notes').value || null
+                });
+                showAlert('Consumption recorded', 'success');
+                e.target.reset();
+                document.getElementById('c_date').valueAsDate = new Date();
+                loadInventory(); loadConsumption();
+            } catch (err) { showAlert('Failed: ' + err.message, 'error'); }
+        });
+
+        loadBatches(); loadInventory(); loadPurchases(); loadConsumption();
+    </script>
+</body>
+</html>

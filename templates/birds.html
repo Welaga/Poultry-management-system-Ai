@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Birds - Poultry MS</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="layout">
+        <div id="sidebar"></div>
+        <main class="main-content">
+            <button class="mobile-menu-btn" onclick="openMobileSidebar()" aria-label="Open menu">☰</button>
+            <header class="page-header">
+                <h1>🐓 Bird Management</h1>
+                <p>Manage your bird batches and mortality records</p>
+            </header>
+
+            <div class="tabs">
+                <button class="tab active" data-tab="batches">Batches</button>
+                <button class="tab" data-tab="mortality">Mortality</button>
+            </div>
+
+            <section id="tab-batches" class="tab-content active">
+                <div class="card">
+                    <h3>Add New Batch</h3>
+                    <form id="batchForm" class="form-grid">
+                        <div class="form-group"><label>Batch Code</label><input type="text" id="b_code" required placeholder="e.g. B001"></div>
+                        <div class="form-group"><label>Breed</label><input type="text" id="b_breed" required placeholder="e.g. ISA Brown"></div>
+                        <div class="form-group">
+                            <label>Bird Type</label>
+                            <select id="b_type">
+                                <option value="layer">Layer</option>
+                                <option value="broiler">Broiler</option>
+                                <option value="breeder">Breeder</option>
+                            </select>
+                        </div>
+                        <div class="form-group"><label>Initial Count</label><input type="number" id="b_count" required min="1"></div>
+                        <div class="form-group"><label>Arrival Date</label><input type="date" id="b_arrival" required></div>
+                        <div class="form-group">
+                            <label>Stage</label>
+                            <select id="b_stage">
+                                <option value="chick">Chick</option>
+                                <option value="grower">Grower</option>
+                                <option value="layer">Layer</option>
+                                <option value="finisher">Finisher</option>
+                            </select>
+                        </div>
+                        <div class="form-group"><label>Age (weeks)</label><input type="number" id="b_age" value="0" min="0"></div>
+                        <div class="form-group"><label>Cost / Bird</label><input type="number" id="b_cost" value="0" min="0" step="0.01"></div>
+                        <div class="form-group form-full"><label>Notes</label><textarea id="b_notes" rows="2"></textarea></div>
+                        <div class="form-actions"><button type="submit" class="btn btn-primary">Add Batch</button></div>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h3>All Batches</h3>
+                    <div class="table-wrap"><table class="data-table">
+                        <thead>
+                            <tr><th>Code</th><th>Breed</th><th>Type</th><th>Initial</th><th>Current</th><th>Stage</th><th>Arrival</th><th>Actions</th></tr>
+                        </thead>
+                        <tbody id="batchesTable"><tr><td colspan="8">Loading...</td></tr></tbody>
+                    </table></div>
+                </div>
+            </section>
+
+            <section id="tab-mortality" class="tab-content">
+                <div class="card">
+                    <h3>Record Mortality</h3>
+                    <form id="mortalityForm" class="form-grid">
+                        <div class="form-group"><label>Batch</label><select id="m_batch" required></select></div>
+                        <div class="form-group"><label>Death Date</label><input type="date" id="m_date" required></div>
+                        <div class="form-group"><label>Number of Deaths</label><input type="number" id="m_count" required min="1"></div>
+                        <div class="form-group"><label>Cause</label><input type="text" id="m_cause"></div>
+                        <div class="form-group form-full"><label>Notes</label><textarea id="m_notes" rows="2"></textarea></div>
+                        <div class="form-actions"><button type="submit" class="btn btn-danger">Record</button></div>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h3>Recent Mortality</h3>
+                    <div class="table-wrap"><table class="data-table">
+                        <thead><tr><th>Date</th><th>Batch ID</th><th>Count</th><th>Cause</th><th>Notes</th></tr></thead>
+                        <tbody id="mortalityTable"><tr><td colspan="5">Loading...</td></tr></tbody>
+                    </table></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    <script>
+        initLayout('birds');
+
+        // default arrival date
+        document.getElementById('b_arrival').valueAsDate = new Date();
+        document.getElementById('m_date').valueAsDate = new Date();
+
+        document.querySelectorAll('.tab').forEach(t => {
+            t.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(x => x.classList.remove('active'));
+                t.classList.add('active');
+                document.getElementById('tab-' + t.dataset.tab).classList.add('active');
+            });
+        });
+
+        async function loadBatches() {
+            try {
+                const batches = await apiGet('/birds/batches');
+                const tbody = document.getElementById('batchesTable');
+                const sel = document.getElementById('m_batch');
+                if (!batches || batches.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="8" class="muted">No batches yet</td></tr>';
+                    sel.innerHTML = '<option value="">No batches</option>';
+                    return;
+                }
+                tbody.innerHTML = batches.map(b => `
+                    <tr>
+                        <td><strong>${b.batch_code}</strong></td>
+                        <td>${b.breed}</td>
+                        <td><span class="badge">${b.bird_type}</span></td>
+                        <td>${b.initial_count}</td>
+                        <td><strong>${b.current_count}</strong></td>
+                        <td>${b.growth_stage}</td>
+                        <td>${formatDateOnly(b.arrival_date)}</td>
+                        <td><button class="btn btn-sm btn-danger" onclick="deleteBatch(${b.id})">Delete</button></td>
+                    </tr>
+                `).join('');
+                sel.innerHTML = batches.map(b =>
+                    `<option value="${b.id}">${b.batch_code} - ${b.breed} (${b.current_count} birds)</option>`
+                ).join('');
+            } catch (err) {
+                showAlert('Failed to load batches: ' + err.message, 'error');
+            }
+        }
+
+        async function loadMortality() {
+            try {
+                const records = await apiGet('/birds/mortality');
+                const tbody = document.getElementById('mortalityTable');
+                if (!records || records.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="muted">No mortality records</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = records.map(r => `
+                    <tr>
+                        <td>${formatDateOnly(r.death_date)}</td>
+                        <td>${r.batch_id}</td>
+                        <td>${r.count}</td>
+                        <td>${r.cause || '-'}</td>
+                        <td>${r.notes || '-'}</td>
+                    </tr>
+                `).join('');
+            } catch (err) { showAlert('Failed: ' + err.message, 'error'); }
+        }
+
+        document.getElementById('batchForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                await apiPost('/birds/batches', {
+                    batch_code: document.getElementById('b_code').value,
+                    breed: document.getElementById('b_breed').value,
+                    bird_type: document.getElementById('b_type').value,
+                    initial_count: parseInt(document.getElementById('b_count').value),
+                    arrival_date: document.getElementById('b_arrival').value,
+                    growth_stage: document.getElementById('b_stage').value,
+                    age_weeks: parseInt(document.getElementById('b_age').value || 0),
+                    cost_per_bird: parseFloat(document.getElementById('b_cost').value || 0),
+                    notes: document.getElementById('b_notes').value || null
+                });
+                showAlert('Batch added', 'success');
+                e.target.reset();
+                document.getElementById('b_arrival').valueAsDate = new Date();
+                loadBatches();
+            } catch (err) { showAlert('Failed: ' + err.message, 'error'); }
+        });
+
+        document.getElementById('mortalityForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                await apiPost('/birds/mortality', {
+                    batch_id: parseInt(document.getElementById('m_batch').value),
+                    death_date: document.getElementById('m_date').value,
+                    count: parseInt(document.getElementById('m_count').value),
+                    cause: document.getElementById('m_cause').value || null,
+                    notes: document.getElementById('m_notes').value || null
+                });
+                showAlert('Mortality recorded', 'success');
+                e.target.reset();
+                document.getElementById('m_date').valueAsDate = new Date();
+                loadMortality(); loadBatches();
+            } catch (err) { showAlert('Failed: ' + err.message, 'error'); }
+        });
+
+        async function deleteBatch(id) {
+            if (!confirm('Delete this batch?')) return;
+            try {
+                await apiDelete('/birds/batches/' + id);
+                showAlert('Batch deleted', 'success');
+                loadBatches();
+            } catch (err) { showAlert('Failed: ' + err.message, 'error'); }
+        }
+
+        loadBatches();
+        loadMortality();
+    </script>
+</body>
+</html>
