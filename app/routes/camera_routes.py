@@ -1,12 +1,11 @@
 """AI Camera detection endpoints — image upload, webcam stream, and live counts."""
-import asyncio
 import base64
 from datetime import datetime
 from typing import Optional
 
 import cv2
 import numpy as np
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -14,9 +13,28 @@ from app.database import get_db
 from app.config import settings
 from app.models.detection import CameraDetection
 from app.ml.detector import get_detector
-from app.utils.security import get_current_user
+from app.utils.security import get_current_user, decode_token
+from app.models.user import User
 
 router = APIRouter()
+
+
+def _get_stream_user(
+    token: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Accept JWT from ?token= query param (needed for <img src> MJPEG streams)."""
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = decode_token(token)
+        username: str = payload.get("sub", "")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = db.query(User).filter(User.username == username).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
 
 # Shared latest-frame state for streaming
 _camera_state = {
@@ -140,11 +158,14 @@ def _gen_stream(db_factory):
 
 
 @router.get("/stream")
-def stream(current=Depends(get_current_user)):
-    """MJPEG live stream with on-the-fly detection."""
+def stream(current=Depends(_get_stream_user)):
+    """MJPEG live stream with on-the-fly detection. Auth via ?token= query param."""
     from app.database import SessionLocal
-    return StreamingResponse(_gen_stream(SessionLocal),
-                             media_type="multipart/x-mixed-replace; boundary=frame")
+    return StreamingResponse(
+        _gen_stream(SessionLocal),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-cache, no-store"},
+    )
 
 
 @router.get("/live-counts")

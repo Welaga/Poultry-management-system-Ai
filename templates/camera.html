@@ -5,6 +5,39 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Camera - Poultry MS</title>
     <link rel="stylesheet" href="/static/css/main.css">
+    <style>
+        #cameraFeed {
+            width: 100%;
+            max-height: 420px;
+            object-fit: contain;
+            background: #000;
+            border-radius: 6px;
+            display: block;
+        }
+        #cameraPlaceholder {
+            width: 100%;
+            height: 280px;
+            background: #111;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #888;
+            flex-direction: column;
+            gap: 8px;
+            font-size: 0.95rem;
+        }
+        #streamError {
+            display: none;
+            margin-top: 8px;
+            padding: 10px 14px;
+            background: #fff0f0;
+            border: 1px solid #f5c2c2;
+            border-radius: 6px;
+            color: #c0392b;
+            font-size: 0.88rem;
+        }
+    </style>
 </head>
 <body>
     <div class="layout">
@@ -13,141 +46,238 @@
             <button class="mobile-menu-btn" onclick="openMobileSidebar()" aria-label="Open menu">☰</button>
             <header class="page-header">
                 <h1>📹 AI Camera Detection</h1>
-                <p>Detect and count birds & eggs using OpenCV / YOLO</p>
+                <p>Detect and count birds &amp; eggs using OpenCV / YOLO</p>
             </header>
 
             <section class="stats-grid">
                 <div class="stat-card stat-green">
-                    <div class="stat-label">Live Birds</div>
+                    <div class="stat-label">LIVE BIRDS</div>
                     <div class="stat-value" id="liveCount">0</div>
                 </div>
                 <div class="stat-card stat-red">
-                    <div class="stat-label">Dead Birds</div>
+                    <div class="stat-label">DEAD BIRDS</div>
                     <div class="stat-value" id="deadCount">0</div>
                 </div>
                 <div class="stat-card stat-yellow">
-                    <div class="stat-label">Eggs</div>
+                    <div class="stat-label">EGGS</div>
                     <div class="stat-value" id="eggCount">0</div>
                 </div>
                 <div class="stat-card stat-blue">
-                    <div class="stat-label">Status</div>
+                    <div class="stat-label">STATUS</div>
                     <div class="stat-value" id="cameraStatus" style="font-size:1.2rem">Idle</div>
                 </div>
             </section>
 
             <div class="camera-grid">
+                <!-- Upload panel -->
                 <div class="card">
                     <h3>📤 Upload Image for Detection</h3>
                     <input type="file" id="imageInput" accept="image/*">
-                    <button class="btn btn-primary" onclick="detectImage()">Detect</button>
+                    <button class="btn btn-primary" onclick="detectImage()" style="margin-top:10px">Detect</button>
                     <div id="detectResult" style="margin-top:16px"></div>
                 </div>
 
+                <!-- Live feed panel -->
                 <div class="card">
                     <h3>🔴 Live Camera Feed</h3>
-                    <div class="camera-container">
-                        <img id="streamImg" src="" alt="Live stream" style="width:100%; max-height:400px; object-fit:contain; background:#000;">
+
+                    <div id="cameraPlaceholder">
+                        <span style="font-size:2rem">📷</span>
+                        <span>Click <strong>Start Camera</strong> to begin</span>
+                        <span style="font-size:0.8rem;color:#666">Uses server-side webcam — no browser permission needed</span>
                     </div>
+
+                    <!-- MJPEG stream from backend -->
+                    <img id="cameraFeed" src="" alt="Live camera feed" style="display:none;"
+                         onerror="onStreamError()">
+
+                    <div id="streamError">
+                        ⚠️ Stream stopped or camera unavailable.
+                        <a href="#" onclick="startCamera();return false;">Retry</a>
+                    </div>
+
                     <div class="form-actions" style="margin-top:12px">
-                        <button class="btn btn-success" onclick="startStream()">Start Stream</button>
-                        <button class="btn btn-danger" onclick="stopStream()">Stop</button>
+                        <button class="btn btn-success" id="btnStart" onclick="startCamera()">Start Camera</button>
+                        <button class="btn btn-danger"  id="btnStop"  onclick="stopCamera()" disabled>Stop Camera</button>
                     </div>
-                    <p class="muted" style="margin-top:8px"><small>Note: Streaming requires a webcam attached to the server. The endpoint requires authentication, so the browser must include the JWT — use the "Start Stream" button.</small></p>
                 </div>
             </div>
 
+            <!-- Detection history -->
             <section class="card">
                 <h3>Recent Detections</h3>
-                <div class="table-wrap"><table class="data-table">
-                    <thead><tr><th>Time</th><th>Source</th><th>Live</th><th>Dead</th><th>Eggs</th><th>Confidence</th></tr></thead>
-                    <tbody id="historyTable"><tr><td colspan="6">Loading...</td></tr></tbody>
-                </table></div>
+                <div class="table-wrap">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th><th>Source</th><th>Live</th>
+                                <th>Dead</th><th>Eggs</th><th>Confidence</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTable">
+                            <tr><td colspan="6" style="text-align:center">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </section>
         </main>
     </div>
 
     <script src="/static/js/app.js"></script>
     <script>
-        initLayout('camera');
+let pollInterval = null;
+let streamActive = false;
 
-        async function loadCounts() {
-            try {
-                const c = await apiGet('/camera/live-counts');
-                document.getElementById('liveCount').textContent = c.live || 0;
-                document.getElementById('deadCount').textContent = c.dead || 0;
-                document.getElementById('eggCount').textContent = c.eggs || 0;
-                document.getElementById('cameraStatus').textContent = c.active ? 'Active' : 'Idle';
-            } catch (err) {}
+// ── Live Camera (backend MJPEG stream) ────────────────────────────────────────
+
+function startCamera() {
+    const token = getToken();
+    if (!token) {
+        showAlert('Session expired. Please log in again.', 'error');
+        return;
+    }
+
+    const img         = document.getElementById('cameraFeed');
+    const placeholder = document.getElementById('cameraPlaceholder');
+    const errBox      = document.getElementById('streamError');
+
+    // Set the MJPEG src with auth token as query param
+    img.src = `/api/camera/stream?token=${encodeURIComponent(token)}&_t=${Date.now()}`;
+    img.style.display    = 'block';
+    placeholder.style.display = 'none';
+    errBox.style.display = 'none';
+
+    streamActive = true;
+    document.getElementById('cameraStatus').textContent = 'Active';
+    document.getElementById('btnStart').disabled = true;
+    document.getElementById('btnStop').disabled  = false;
+
+    showAlert('Camera stream started', 'success');
+
+    // Poll detection counts from server every 3 seconds
+    pollInterval = setInterval(pollCounts, 3000);
+}
+
+function stopCamera() {
+    const img         = document.getElementById('cameraFeed');
+    const placeholder = document.getElementById('cameraPlaceholder');
+
+    // Remove src to kill the HTTP connection
+    img.src = '';
+    img.style.display    = 'none';
+    placeholder.style.display = 'flex';
+
+    if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+    streamActive = false;
+
+    document.getElementById('cameraStatus').textContent = 'Idle';
+    document.getElementById('btnStart').disabled = false;
+    document.getElementById('btnStop').disabled  = true;
+
+    showAlert('Camera stopped', 'info');
+}
+
+function onStreamError() {
+    if (!streamActive) return;          // already stopped manually
+    const errBox = document.getElementById('streamError');
+    errBox.style.display = 'block';
+    document.getElementById('cameraFeed').style.display = 'none';
+    document.getElementById('cameraPlaceholder').style.display = 'flex';
+    document.getElementById('cameraStatus').textContent = 'Error';
+    document.getElementById('btnStart').disabled = false;
+    document.getElementById('btnStop').disabled  = true;
+    if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+    streamActive = false;
+}
+
+async function pollCounts() {
+    try {
+        const data = await apiGet('/camera/live-counts');
+        if (data) {
+            document.getElementById('liveCount').textContent = data.live ?? 0;
+            document.getElementById('deadCount').textContent = data.dead ?? 0;
+            document.getElementById('eggCount').textContent  = data.eggs ?? 0;
+        }
+    } catch (e) {
+        console.warn('Count poll failed:', e.message);
+    }
+}
+
+// ── Image upload detection ────────────────────────────────────────────────────
+
+async function detectImage() {
+    const input = document.getElementById('imageInput');
+    if (!input.files || !input.files[0]) {
+        showAlert('Please select an image first.', 'warning');
+        return;
+    }
+
+    const resultDiv = document.getElementById('detectResult');
+    resultDiv.innerHTML = '<p>Detecting, please wait…</p>';
+    document.getElementById('cameraStatus').textContent = 'Running';
+
+    const formData = new FormData();
+    formData.append('file', input.files[0]);
+
+    try {
+        const data = await apiUpload('/camera/detect-image', formData);
+
+        document.getElementById('liveCount').textContent = data.live_birds ?? 0;
+        document.getElementById('deadCount').textContent = data.dead_birds ?? 0;
+        document.getElementById('eggCount').textContent  = data.eggs       ?? 0;
+        document.getElementById('cameraStatus').textContent = 'Done';
+
+        let html = `
+            <div style="padding:12px;background:#f0f9f0;border-radius:8px;border:1px solid #b2dfdb">
+                <strong>Detection Results</strong> — model: <em>${data.model}</em><br><br>
+                🟢 Live Birds: <strong>${data.live_birds}</strong> &nbsp;
+                🔴 Dead Birds: <strong>${data.dead_birds}</strong> &nbsp;
+                🟡 Eggs: <strong>${data.eggs}</strong> &nbsp;
+                Confidence: <strong>${(data.confidence * 100).toFixed(1)}%</strong>
+            </div>`;
+
+        if (data.annotated_image) {
+            html += `<img src="${data.annotated_image}"
+                style="margin-top:12px;width:100%;border-radius:8px;border:1px solid #ddd;"
+                alt="Annotated detection result">`;
         }
 
-        async function loadHistory() {
-            try {
-                const resp = await apiGet('/camera/history');
-                const recs = resp.history || [];
-                const tb = document.getElementById('historyTable');
-                if (recs.length === 0) { tb.innerHTML = '<tr><td colspan="6" class="muted">No detections</td></tr>'; return; }
-                tb.innerHTML = recs.map(r => `<tr>
-                    <td>${formatDate(r.time)}</td>
-                    <td>${r.source || 'image'}</td>
-                    <td>${r.live}</td>
-                    <td>${r.dead}</td>
-                    <td>${r.eggs}</td>
-                    <td>${r.confidence}%</td>
-                </tr>`).join('');
-            } catch (err) {}
+        resultDiv.innerHTML = html;
+        await loadHistory();
+    } catch (err) {
+        document.getElementById('cameraStatus').textContent = 'Error';
+        resultDiv.innerHTML = `<p style="color:red">Detection failed: ${err.message}</p>`;
+        showAlert('Detection failed: ' + err.message, 'error');
+    }
+}
+
+// ── Detection history ─────────────────────────────────────────────────────────
+
+async function loadHistory() {
+    try {
+        const data = await apiGet('/camera/history?limit=20');
+        const tbody = document.getElementById('historyTable');
+        if (!data || !data.history || data.history.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center">No detections yet</td></tr>';
+            return;
         }
+        tbody.innerHTML = data.history.map(r => `
+            <tr>
+                <td>${formatDate(r.time)}</td>
+                <td>${r.source}</td>
+                <td>${r.live}</td>
+                <td>${r.dead}</td>
+                <td>${r.eggs}</td>
+                <td>${r.confidence}%</td>
+            </tr>`).join('');
+    } catch (e) {
+        console.error('Failed to load detection history:', e);
+    }
+}
 
-        async function detectImage() {
-            const fileInput = document.getElementById('imageInput');
-            if (!fileInput.files[0]) { showAlert('Choose an image first', 'error'); return; }
-
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
-            try {
-                showAlert('Detecting...', 'info');
-                const result = await apiUpload('/camera/detect-image', formData);
-                document.getElementById('detectResult').innerHTML = `
-                    <div class="detection-result">
-                        <p><strong>Detected (${result.model || 'OpenCV'}):</strong>
-                            🟢 Live: <strong>${result.live_birds}</strong> |
-                            🔴 Dead: <strong>${result.dead_birds}</strong> |
-                            🥚 Eggs: <strong>${result.eggs}</strong> |
-                            Confidence: <strong>${(result.confidence * 100).toFixed(1)}%</strong>
-                        </p>
-                        ${result.annotated_image ? `<img src="${result.annotated_image}" style="max-width:100%; margin-top:12px; border-radius:8px">` : ''}
-                    </div>
-                `;
-                showAlert('Detection complete', 'success');
-                loadCounts(); loadHistory();
-            } catch (err) {
-                showAlert('Failed: ' + err.message, 'error');
-            }
-        }
-
-        async function startStream() {
-            // Stream endpoint requires auth header. Browsers can't add headers to <img src>.
-            // Workaround: fetch as blob URL, but MJPEG is continuous so we use a query token approach.
-            // Simplest: open in new window with token query (here we just attempt direct).
-            const token = getToken();
-            const img = document.getElementById('streamImg');
-            // We use a fetch + blob approach for MJPEG-by-frame is complex; the easiest is to allow
-            // <img> with a session cookie. As a fallback we display a notice.
-            try {
-                // Attempt with token in URL query (server must accept it; current implementation does not).
-                showAlert('Streaming requires server-side webcam. Verify your camera is connected.', 'info');
-                img.src = '/api/camera/stream';
-            } catch (err) {
-                showAlert('Stream failed: ' + err.message, 'error');
-            }
-        }
-
-        function stopStream() {
-            document.getElementById('streamImg').src = '';
-        }
-
-        loadCounts();
-        loadHistory();
-        setInterval(loadCounts, 5000);
+// ── Init ──────────────────────────────────────────────────────────────────────
+initLayout('camera');
+loadHistory();
     </script>
 </body>
 </html>
